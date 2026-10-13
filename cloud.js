@@ -58,7 +58,7 @@ export function connectionSettings(url = SUPABASE_URL, key = SUPABASE_PUBLISHABL
 }
 
 export class SupabaseClient {
-  constructor(config, { fetcher = globalThis.fetch, storage = globalThis.localStorage } = {}) {
+  constructor(config, { fetcher = globalThis.fetch?.bind(globalThis), storage = globalThis.localStorage } = {}) {
     this.config = config; this.fetcher = fetcher; this.storage = storage;
     this.sessionKey = `life-os.cloud.session.v1.${config.project}`;
     try { this.session = JSON.parse(storage.getItem(this.sessionKey) || 'null'); } catch { this.session = null; }
