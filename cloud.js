@@ -10,6 +10,41 @@ export function cloudSnapshot(state) {
   return next;
 }
 const same = (a, b) => !hasUserContentChanges(a, b);
+
+/** Supabase's redirect_to query parameter must retain the GitHub Pages repo path. */
+export function authRedirectUrl(location = globalThis.location) {
+  if (!location) return undefined;
+  const url = new URL(location.href || `${location.origin}${location.pathname}`);
+  if (url.protocol !== 'https:' || url.username || url.password) throw new Error('请在正式 HTTPS 网址上发送登录邮件。');
+  return `${url.origin}${url.pathname}`;
+}
+
+/** Remove callback secrets synchronously, before validating or making requests. */
+export function takeAuthCallback({ location = globalThis.location, history = globalThis.history, appUrl = import.meta.url, now = Date.now() } = {}) {
+  if (!location?.hash) return null;
+  const params = new URLSearchParams(location.hash.slice(1));
+  if (!['access_token', 'refresh_token', 'error', 'error_code', 'error_description'].some(key => params.has(key))) return null;
+  // replaceState is deliberately required. If the URL cannot be cleaned, do not
+  // send or persist its credentials. The full secret fragment is never logged.
+  if (!history?.replaceState) throw new Error('无法安全处理登录链接，请在正式网站重新发送登录邮件。');
+  history.replaceState(history.state ?? null, '', `${location.pathname}${location.search || ''}#decision`);
+  const page = new URL(location.href || `${location.origin}${location.pathname}`);
+  const application = new URL('.', appUrl);
+  const pageMatches = page.origin === application.origin && [application.pathname, `${application.pathname}index.html`].includes(page.pathname);
+  if (page.protocol !== 'https:' || !pageMatches) throw new Error('请在正式网站打开登录邮件中的链接。');
+  if (params.has('error') || params.has('error_code') || params.has('error_description')) throw new Error('登录链接已失效或无法验证，请重新发送登录邮件。');
+  if (params.has('type') && !['magiclink', 'signup', 'email'].includes(params.get('type'))) throw new Error('这个链接不是邮箱登录链接，请重新发送登录邮件。');
+  const access_token = params.get('access_token');
+  const refresh_token = params.get('refresh_token');
+  const token_type = params.get('token_type') || 'bearer';
+  const expires_in = Number(params.get('expires_in'));
+  const expires_at = params.has('expires_at') ? Number(params.get('expires_at')) : Math.floor(now / 1000) + expires_in;
+  if (!access_token || !refresh_token || /\s/.test(access_token + refresh_token) || access_token.length > 16000 || refresh_token.length > 16000 || token_type.toLowerCase() !== 'bearer' || !Number.isSafeInteger(expires_at) || expires_at * 1000 <= now || !Number.isFinite(expires_in) || expires_in <= 0) {
+    throw new Error('登录链接不完整或已过期，请重新发送登录邮件。');
+  }
+  return { access_token, refresh_token, expires_at, expires_in, token_type: 'bearer' };
+}
+
 export function connectionSettings(url = SUPABASE_URL, key = SUPABASE_PUBLISHABLE_KEY) {
   if (!url || !key) return { configured: false };
   const parsed = new URL(url);
@@ -30,11 +65,12 @@ export class SupabaseClient {
     this.refreshing = null;
   }
   remember(session) {
-    this.session = session ? { ...session, expires_at: session.expires_at || Math.floor(Date.now() / 1000) + (session.expires_in || 3600) } : null;
-    if (session) this.storage.setItem(this.sessionKey, JSON.stringify(this.session));
+    const next = session ? { ...session, expires_at: session.expires_at || Math.floor(Date.now() / 1000) + (session.expires_in || 3600) } : null;
+    if (session) this.storage.setItem(this.sessionKey, JSON.stringify(next));
     else this.storage.removeItem(this.sessionKey);
+    this.session = next;
   }
-  async request(path, { method = 'GET', body, authenticated = false, refresh = true, expectedUserId = this.session?.user?.id } = {}) {
+  async request(path, { method = 'GET', body, authenticated = false, refresh = true, expectedUserId = this.session?.user?.id, verificationToken } = {}) {
     if (authenticated && refresh) await this.ensureSession();
     if (authenticated && (!expectedUserId || this.session?.user?.id !== expectedUserId)) throw Object.assign(new Error('登录账号已改变，请重新同步。'), { status: 401 });
     const controller = new AbortController();
@@ -42,6 +78,7 @@ export class SupabaseClient {
     try {
       const headers = { apikey: this.config.key, 'Content-Type': 'application/json' };
       if (authenticated) headers.Authorization = `Bearer ${this.session.access_token}`;
+      else if (verificationToken) headers.Authorization = `Bearer ${verificationToken}`;
       const response = await this.fetcher(`${this.config.url}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal, cache: 'no-store' });
       const text = await response.text();
       let payload;
@@ -57,8 +94,16 @@ export class SupabaseClient {
       throw error;
     } finally { clearTimeout(timeout); }
   }
-  async sendCode(email) {
-    return this.request('/auth/v1/otp', { method: 'POST', body: { email, create_user: true } });
+  async sendCode(email, redirectTo = authRedirectUrl()) {
+    const query = redirectTo ? `?${new URLSearchParams({ redirect_to: redirectTo })}` : '';
+    return this.request(`/auth/v1/otp${query}`, { method: 'POST', body: { email, create_user: true } });
+  }
+  async verifyLinkSession(credentials) {
+    // Never trust user/id/email fields or JWT claims from the fragment. Verify
+    // against this project's auth endpoint without changing the current session.
+    const user = await this.request('/auth/v1/user', { verificationToken: credentials.access_token });
+    if (!user?.id || typeof user.id !== 'string') throw new Error('无法确认登录身份，请重新发送登录邮件。');
+    return { ...credentials, user };
   }
   async verifyCode(email, token) {
     const session = await this.request('/auth/v1/verify', { method: 'POST', body: { email, token, type: 'email' } });
@@ -97,8 +142,9 @@ export class SupabaseClient {
 }
 
 export class CloudSync {
-  constructor({ getState, replaceState, notify, storage = globalThis.localStorage, config, client } = {}) {
+  constructor({ getState, replaceState, notify, storage = globalThis.localStorage, config, client, location = globalThis.location, history = globalThis.history, appUrl = import.meta.url } = {}) {
     this.getState = getState; this.replaceState = replaceState; this.notify = notify || (() => {}); this.storage = storage;
+    this.browser = { location, history, appUrl };
     this.listeners = new Set(); this.user = null; this.meta = null; this.busy = null; this.pending = false; this.epoch = 0; this.debounce = null; this.poll = null;
     try { this.config = config || connectionSettings(); } catch (error) { this.config = { configured: false }; this.configError = error.message; }
     this.client = this.config.configured ? client || new SupabaseClient(this.config, { storage }) : null;
@@ -120,8 +166,10 @@ export class CloudSync {
         let session = null;
         try { session = JSON.parse(event.newValue || 'null'); } catch { return; }
         this.client.session = session;
-        if (session?.user?.id === this.user?.id) return;
+        // Also invalidate an incoming link while no account is active yet:
+        // null -> null can still represent an explicit sign-out in another tab.
         this.epoch++;
+        if (session?.user?.id === this.user?.id) return;
         clearTimeout(this.debounce);
         if (session?.user?.id) { this.activate(session.user); this.sync(); }
         else {
@@ -142,6 +190,29 @@ export class CloudSync {
       }
     };
     globalThis.addEventListener('storage', this.storageHandler);
+    // An incoming email link takes priority over a cached login. Invalid links
+    // preserve the existing guest/account workspace and never start a sync.
+    const callbackEpoch = this.epoch;
+    const originalSession = this.client.session;
+    try {
+      const credentials = takeAuthCallback(this.browser);
+      if (credentials) {
+        this.setStatus('connecting', '正在验证登录链接…');
+        const session = await this.client.verifyLinkSession(credentials);
+        if (callbackEpoch !== this.epoch || this.client.session !== originalSession) return;
+        this.client.remember(session);
+        this.activate(session.user);
+        await this.sync();
+        this.notify('已通过邮件链接登录');
+        return;
+      }
+    } catch {
+      if (callbackEpoch === this.epoch) {
+        this.setStatus('error', '登录链接未能完成验证。原有内容已保留，请重新发送登录邮件。');
+        this.notify(this.status.message, 'error');
+      }
+      return;
+    }
     const storedUser = this.client.session?.user;
     if (storedUser?.id) {
       // Restore only this account's offline workspace; never show another account's cache.
@@ -178,7 +249,7 @@ export class CloudSync {
   }
   async sendCode(email) {
     if (!this.client) throw new Error('云端服务还未配置。');
-    return this.client.sendCode(email.trim().toLowerCase());
+    return this.client.sendCode(email.trim().toLowerCase(), authRedirectUrl(this.browser.location));
   }
   async verifyCode(email, code) {
     const user = await this.client.verifyCode(email.trim().toLowerCase(), code.trim());
@@ -275,7 +346,9 @@ export class CloudSync {
     if (this.busy) await this.busy;
     if (this.pending) { await this.sync(); if (this.pending) throw new Error('仍有未同步的修改，请联网同步后退出，或先导出备份。'); }
     this.epoch++; clearTimeout(this.debounce);
+    const epoch = this.epoch;
     try { await this.client.logout(); } catch { /* Local sign-out still clears the browser session. */ }
+    if (epoch !== this.epoch) return;
     this.user = null; this.meta = null; this.pending = false; this.status = { phase: 'signed-out', lastSync: null, conflicts: 0, message: '' };
     setStorageScope(); this.replaceState(loadState()); this.setStatus('signed-out');
   }

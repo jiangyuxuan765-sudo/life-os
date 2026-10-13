@@ -47,6 +47,13 @@ const dialog = $('#editor-dialog');
 const view = $('#view');
 let cloudSync;
 let workspaceScope = STORAGE_KEY;
+const editorBaselines = new WeakMap();
+const editorCollections = { goal: 'goals', decision: 'decisions', resolve: 'decisions', task: 'tasks', note: 'notes', metrics: 'metrics' };
+// Entity key order may change after cloud merges; compare values, not insertion order.
+function entitySnapshot(value) {
+  const ordered = entry => Array.isArray(entry) ? entry.map(ordered) : entry && typeof entry === 'object' ? Object.fromEntries(Object.keys(entry).sort().map(key => [key, ordered(entry[key])])) : entry;
+  return JSON.stringify(ordered(value ?? null));
+}
 
 function persist() {
   try {
@@ -219,6 +226,17 @@ function route() {
 function openDialog(title, subtitle, body, footer, kind = '', id = '') {
   lastFocused = document.activeElement;
   $('#dialog-content').innerHTML = `<form ${kind ? `data-kind="${kind}" data-id="${escape(id)}"` : ''}><div class="modal-header"><div><p class="eyebrow">LIFE OS / YOUR SPACE</p><h2 id="dialog-title">${title}</h2><p>${subtitle}</p></div>${iconButton('关闭对话框', 'close-dialog', '', 'close')}</div><div class="modal-body">${body}<p class="form-error" role="alert" hidden></p></div><div class="modal-footer">${footer || `${button('取消', 'close-dialog', 'secondary')}<button class="button primary" type="submit">保存${icon('check')}</button>`}</div></form>`;
+  const form = $('form', $('#dialog-content'));
+  const collection = editorCollections[kind];
+  if (form && collection) {
+    editorBaselines.set(form, {
+      scope: STORAGE_KEY, kind, id: id || '', collection,
+      entity: entitySnapshot(state[collection].find(item => item.id === id)),
+      // A metric's editable date is its identity. Snapshot each potential target
+      // so changing the date cannot overwrite an entry updated after opening.
+      dates: kind === 'metrics' ? new Map(state.metrics.map(item => [item.date, entitySnapshot(item)])) : null,
+    });
+  }
   if (!dialog.open) dialog.showModal();
   requestAnimationFrame(() => $('input:not([type="hidden"]), textarea, select', dialog)?.focus());
 }
@@ -227,6 +245,17 @@ function inputField(label, name, value = '', options = '') { return `<label clas
 function textareaField(label, name, value = '', options = '') { return `<label class="field"><span>${label}</span><textarea class="textarea" name="${name}" ${options}>${escape(value)}</textarea></label>`; }
 function selectField(label, name, values, current) { return `<label class="field"><span>${label}</span><select class="select" name="${name}">${values.map(item => { const [value, text] = Array.isArray(item) ? item : [item, item]; return `<option value="${escape(value)}" ${value === current ? 'selected' : ''}>${escape(text)}</option>`; }).join('')}</select></label>`; }
 function error(form, message) { const el = $('.form-error', form); el.hidden = false; el.textContent = message; }
+function editorCanSave(form, data) {
+  const baseline = editorBaselines.get(form);
+  if (!baseline) { error(form, '这个编辑窗口已失效。请先复制草稿，再关闭并重新打开。'); return false; }
+  if (baseline.scope !== STORAGE_KEY) { error(form, '工作区已切换。请先复制草稿，再到正确的工作区重新打开。'); return false; }
+  if (!baseline.id && baseline.kind !== 'metrics') return true;
+  const current = baseline.kind === 'metrics' ? state.metrics.find(item => item.date === data.date) : state[baseline.collection].find(item => item.id === baseline.id);
+  const previous = baseline.kind === 'metrics' ? baseline.dates.get(data.date) ?? entitySnapshot(null) : baseline.entity;
+  if (entitySnapshot(current) === previous) return true;
+  error(form, current ? '这条内容已在其他地方更新。你的草稿仍保留在这里；请先复制草稿，再关闭并重新打开最新内容，避免覆盖更新。' : '这条内容已在其他地方移除。你的草稿仍保留在这里；请先复制草稿，再关闭并新建。');
+  return false;
+}
 function editDecision(id) {
   const item = state.decisions.find(d => d.id === id);
   openDialog(item ? '把这个选择想清楚' : '记下一个重要的选择', '先把问题写下来，再给自己一点思考的空间。', `${inputField('要做什么决定？', 'title', item?.title, 'required maxlength="100" placeholder="例如：下一阶段，该专注哪项能力？"')}${textareaField('背景与考量', 'context', item?.context, 'rows="3" maxlength="1200" placeholder="为什么要做这个决定？什么对你最重要？"')}<div class="field-row">${selectField('所属领域', 'category', ['工作', '成长', '生活', '健康', '关系', '个人'], item?.category || '成长')}${selectField('影响程度', 'impact', ['高', '中', '低'], item?.impact || '中')}</div>${inputField('希望何时做出决定', 'deadline', item ? item.deadline : addDays(todayISO(), 3), 'type="date"')}${textareaField('备选方案（每行一个）', 'options', (item?.options || []).join('\n'), 'rows="3" maxlength="1000" placeholder="方案 A\n方案 B\n也可以暂时不做改变"')}`, item ? `<div class="modal-secondary-actions">${iconButton('删除决策', 'delete-item', `data-kind="decisions" data-id="${escape(id)}"`, 'trash')}${button(item.status === 'paused' ? '恢复思考' : '暂时搁置', 'pause-decision', 'ghost', `data-id="${escape(id)}"`, item.status === 'paused' ? 'play' : 'pause')}${button(item.status === 'decided' ? '查看选择' : '做出选择', 'resolve-decision', 'secondary', `data-id="${escape(id)}"`, 'decision')}</div><button class="button primary" type="submit">保存修改${icon('check')}</button>` : '', 'decision', id);
@@ -329,18 +358,32 @@ document.addEventListener('click', event => {
       }
       break;
     }
-    case 'undo-item': if (undoItem) { state[undoItem.kind].splice(undoItem.index, 0, undoItem.item); undoItem = null; commit('内容已恢复'); } break;
+    case 'undo-item': if (undoItem) {
+      const saved = undoItem; undoItem = null;
+      if (state[saved.kind].some(item => item.id === saved.item.id)) toast('这条内容已恢复，已保留最新版本');
+      else { state[saved.kind].splice(saved.index, 0, saved.item); commit('内容已恢复'); }
+    } break;
     case 'new-decision': editDecision(); break;
     case 'edit-decision': editDecision(id); break;
     case 'resolve-decision': resolveDecision(id); break;
-    case 'pause-decision': { const item = state.decisions.find(d => d.id === id); if (item) { item.status = item.status === 'paused' ? 'pending' : 'paused'; closeDialog(); commit(item.status === 'paused' ? '已暂时搁置，留待合适的时候' : '已恢复到待思考'); } break; }
+    case 'pause-decision': {
+      const form = trigger.closest('form');
+      if (form && !editorCanSave(form, {})) break;
+      const item = state.decisions.find(d => d.id === id);
+      if (item) { item.status = item.status === 'paused' ? 'pending' : 'paused'; closeDialog(); commit(item.status === 'paused' ? '已暂时搁置，留待合适的时候' : '已恢复到待思考'); }
+      break;
+    }
     case 'decision-filter': decisionFilter = trigger.dataset.value; render(); break;
     case 'new-task': editTask(null, trigger.dataset.date); break;
     case 'edit-task': editTask(id); break;
     case 'toggle-task': { const task = state.tasks.find(t => t.id === id); if (task) { task.done = !task.done; commit(task.done ? '又完成了一小步' : '已恢复为待完成'); } break; }
     case 'delete-task': { const task = state.tasks.find(t => t.id === id); if (task) openDialog('移除这个任务？', '删除后可以通过提示中的「撤销」恢复。', `<p class="delete-preview">${escape(task.title)}</p>`, `${button('保留任务', 'close-dialog', 'secondary')}${button('确认删除', 'confirm-delete-task', 'danger', `data-id="${escape(id)}"`, 'trash')}`); break; }
     case 'confirm-delete-task': { const index = state.tasks.findIndex(t => t.id === id); if (index >= 0) { undoTask = { task: state.tasks[index], index }; state.tasks.splice(index, 1); if (state.timer.taskId === id) state.timer.taskId = null; closeDialog(); const saved = persist(); render(); if (saved) toast('任务已移除', 'success', 7000, '<button class="toast-action" data-action="undo-task">撤销</button>'); } break; }
-    case 'undo-task': if (undoTask) { state.tasks.splice(undoTask.index, 0, undoTask.task); undoTask = null; commit('任务已恢复'); } break;
+    case 'undo-task': if (undoTask) {
+      const saved = undoTask; undoTask = null;
+      if (state.tasks.some(task => task.id === saved.task.id)) toast('这个任务已恢复，已保留最新版本');
+      else { state.tasks.splice(saved.index, 0, saved.task); commit('任务已恢复'); }
+    } break;
     case 'task-filter': taskFilter = trigger.dataset.value; render(); break;
     case 'toggle-goal': { const goal = state.goals.find(g => g.id === id); if (goal) { goal.done = !goal.done; commit(goal.done ? '本周的方向，又近了一步' : '已更新本周方向'); } break; }
     case 'log-metrics': logMetrics(trigger.dataset.date || todayISO()); break;
@@ -400,6 +443,7 @@ document.addEventListener('submit', event => {
   const data = Object.fromEntries(new FormData(form));
   for (const key of Object.keys(data)) if (typeof data[key] === 'string') data[key] = data[key].trim();
   const id = form.dataset.id;
+  if (editorCollections[kind] && !editorCanSave(form, data)) return;
   const collection = { goal: 'goals', decision: 'decisions', resolve: 'decisions', task: 'tasks', note: 'notes' }[kind];
   if (id && collection && !state[collection].some(item => item.id === id)) { error(form, '这条内容已在另一个窗口被移除。可以复制文字，然后关闭并新建。'); return; }
   if (['decision', 'task', 'note', 'goal'].includes(kind) && !data.title) { error(form, '请先写下一个清晰的标题。'); return; }
@@ -480,7 +524,7 @@ cloudSync = new CloudSync({
       undoTask = null; undoItem = null;
       clearTimeout(toastTimeout);
       $('#toast').className = 'toast-container'; $('#toast').innerHTML = '';
-      dialog.close(); dialog.innerHTML = ''; lastFocused = null;
+      dialog.close(); $('#dialog-content').innerHTML = ''; lastFocused = null;
       decisionFilter = 'all'; taskFilter = 'pending'; noteTag = '全部'; noteQuery = '';
     }
     for (const key of Object.keys(state)) delete state[key];

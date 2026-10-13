@@ -1,6 +1,6 @@
 # Life OS 验收记录
 
-执行日期：2026-10-13。原有五页功能的浏览器验证使用 Codex In-app Browser；全部临时验收实体已清理，示例指标已恢复。以下已勾选的浏览器条目为本地版本验收基线；本次云同步扩展的测试使用 Node、内存存储与模拟 HTTP 响应，不能等同于真实云端验收。
+执行日期：2026-10-13。原有五页功能的浏览器验证使用 Codex In-app Browser；全部临时验收实体已清理，示例指标已恢复。以下已勾选的浏览器条目为本地版本验收基线；云同步扩展的自动测试使用 Node、内存存储与模拟 HTTP 响应，不能等同于真实云端验收。
 
 ## 浏览器功能验证
 
@@ -31,7 +31,7 @@
 
 ## 已执行的自动测试与模拟
 
-本次执行 `npm test`，**51 项通过，0 项失败**。这些测试不连接真实 Supabase。
+本次执行 `npm test`，**87 项通过，0 项失败**。这些测试不连接真实 Supabase。
 
 | 测试文件 | 数量 | 已覆盖内容 |
 | --- | ---: | --- |
@@ -39,8 +39,11 @@
 | `tests/sync-core.test.mjs` | 20 | 多端独立新增、字段合并、删除传播、删除与编辑冲突、完整冲突副本、首次基线、同日指标、重复 ID 与非法 JSON 拒绝、未知字段和特殊属性安全保留 |
 | `tests/cloud.test.mjs` | 21 | 首次账号不自动上传本机示例、显式导入、离线修改重试、模拟 CAS 拒绝、请求期间新增修改、冲突先备份、退出与账号缓存隔离、设备计时不上传、真实客户端的请求头和刷新流程 |
 | `tests/auth-races.test.mjs` | 5 | 迟到令牌刷新不覆盖新账号、不恢复已退出会话；刷新期间身份改变时阻止工作区读取/写入；初次身份校验挂起时可接收另一标签的账号切换 |
+| `tests/magic-link.test.mjs` | 16 | Magic Link implicit hash 回调、敏感令牌清理、正式仓库路径、身份确认先于激活、跨标签登录/退出竞态、默认登录邮件与可选 OTP UI |
+| `tests/editor-conflicts.test.mjs` | 20 | 真实应用事件处理器的陈旧表单保护、保留草稿、删除防重建、状态记录日期目标检查、正常新建与重开、决策搁置冲突、切换账号后旧表单失效、撤销不重复插入云端已恢复的条目 |
 
 - [x] `npm run check`：`app.js / store.js / cloud.js / cloud-ui.js / sync-core.js` 语法检查通过。
+- [x] 最新本机基线：`npm test` 87/87 通过，包含 Magic Link 回调与编辑冲突测试；这仍不是实际邮箱或线上 Supabase 验收。
 - [x] 独立 Node 模拟：空截止日期编辑保持为空；跨日恢复专注按实际结束日累计且不重复；多窗口陈旧保存被拒绝。
 - [x] 真实 `SupabaseClient` 配合 fake fetch：公开 key 仅作 `apikey`，用户 JWT 用于 `Authorization`；令牌刷新请求不把公开 key 当成 Bearer token。
 - [x] 独立身份竞态模拟：A 令牌刷新挂起时切到 B，迟到 A 响应不会改变 B 凭证或把 B 私有任务写入 A；跨标签退出后旧响应不会恢复登录。
@@ -48,21 +51,26 @@
 
 ## SQL 与发布文件检查
 
-- [x] `supabase/schema.sql` 静态审阅：用户身份来自 `auth.uid()`；RLS 只读本人；客户端无直接 DML 权限；RPC 仅 authenticated 可执行；固定 search_path；首次插入和更新使用 CAS；五数组结构与 2 MiB 限制。
+- [x] `supabase/schema.sql` 已在目标 Supabase 项目的 SQL Editor 执行成功（界面显示 Success / No rows returned）：用户身份来自 `auth.uid()`；RLS 只读本人；客户端无直接 DML 权限；RPC 仅 authenticated 可执行；固定 search_path；首次插入和更新使用 CAS；五数组结构与 2 MiB 限制。
+- [x] 目标项目使用的 `Automatically expose new tables = false` 与 `automatic RLS = true` 已按脚本契约检查；脚本显式授权 authenticated 的 schema USAGE、SELECT 与 RPC EXECUTE。
+- [x] Site URL 与 Redirect allowlist 已配置为正式地址 `https://jiangyuxuan765-sudo.github.io/life-os/`。
+- [x] 真实 API 匿名请求：使用可公开的 Publishable key，未携带用户 JWT；GET 工作区表与 POST 保存 RPC 均返回 HTTP 401 / SQLSTATE `42501`，未读取或写入任何个人内容。
 - [x] GitHub Actions YAML 解析通过。
 - [x] 临时目录发布模拟：只产生 `index.html / styles.css / app.js / store.js / cloud.js / cloud-ui.js / sync-core.js / cloud-config.js` 八个文件，文档、SQL、测试和 `.git` 不进入产物。
 - [x] 发布配置模拟：Publishable key 和旧版 anon key 可用；`sb_secret`、service_role、空配置、非 HTTPS 项目地址和缺失源文件会失败，错误日志不输出所填 key。
 
-以上没有实际执行 Postgres 脚本，没有验证 Supabase 线上 RLS/CAS，也没有触发生产 GitHub Pages 发布。
+SQL 已在目标项目执行，匿名接口限制也已真实验证；已登录用户之间的 RLS 隔离和线上 CAS 尚未验证。Pages 生产发布状态需另行确认，不能由本机发布模拟结果推断。
 
 ## 待真实云端端到端验收
 
 以下项目保持未勾选，完成实际部署后再逐项验证：
 
-- [ ] 用户拥有并配置真实 Supabase 项目；在 SQL Editor 执行脚本成功，表和权限存在。
-- [ ] 邮件模板包含 `{{ .Token }}`；首次登录与已有账号均收到可用数字 OTP。
-- [ ] 验证码过期、错误验证码、发送限流和实际 SMTP 配额能得到正确反馈。
-- [ ] 正式站点 URL 与认证 allowlist 正确；GitHub Pages 工作流发布成功且八个静态文件可加载。
+- [ ] GitHub Pages 工作流发布成功，正式站点的八个静态文件可加载。
+- [ ] 默认 Magic Link：已有账号收到登录链接，点击后能回到正式仓库路径，敏感 hash 被清除且用户进入自己的工作区。
+- [ ] 默认 Magic Link：首次注册收到 Confirm signup 邮件，确认后能登录并从空工作区开始。
+- [ ] Magic Link 过期、已使用、错误链接和实际邮件服务限流能得到正确反馈。
+- [ ] （可选 OTP）仅在配置自定义 SMTP 或允许模板编辑后，将 `{{ .Token }}` 加入 Magic Link/Confirm signup 模板；收到数字验证码后能完成登录。
+- [ ] （可选 OTP）验证码过期、错误验证码、发送限流和实际 SMTP 配额能得到正确反馈。
 - [ ] 已登录用户可读取本人文档；未登录请求无法读取/调用保存 RPC；账号 B 无法读取或修改账号 A。
 - [ ] 真实数据库中两个首次保存并发只创建一个文档；旧 revision 不覆写新内容，RPC 返回最新版本。
 - [ ] 大于 2 MiB、字段结构错误或未登录的保存请求被数据库拒绝。
@@ -76,4 +84,4 @@
 
 ## 其他未覆盖范围
 
-尚未进行真实手机硬件、Safari/Firefox、屏幕阅读器、200% 浏览器缩放、长期运行、真实邮件和云服务配额验证。云同步代码和部署文件已准备，但真实云端端到端验收未完成；不能把模拟测试通过描述为“云同步已开通”或“双设备已验证”。
+尚未进行真实邮箱 Magic Link、首次注册确认、真实手机硬件、Safari/Firefox、屏幕阅读器、200% 浏览器缩放、长期运行和云服务配额验证。Supabase SQL 已在目标项目执行成功，但真实身份隔离、CAS 并发、生产 Pages 文件加载和双设备同步仍待验收；不能把 87 项模拟测试通过描述为“云同步已开通”或“双设备已验证”。
