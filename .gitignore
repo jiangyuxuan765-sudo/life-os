@@ -1,0 +1,11 @@
+.DS_Store
+node_modules/
+out/
+qa/
+publish-source/
+.env
+.env.*
+!.env.example
+*.log
+*backup*.json
+*conflicts*.json
