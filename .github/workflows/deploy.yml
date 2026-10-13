@@ -1,0 +1,116 @@
+name: Deploy Life OS to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate app and synchronization
+        run: |
+          npm run check
+          npm test
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build the static file allowlist
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import base64
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+          from urllib.parse import urlsplit
+
+          url = os.environ.get('SUPABASE_URL', '').strip().rstrip('/')
+          key = os.environ.get('SUPABASE_PUBLISHABLE_KEY', '').strip()
+          parsed = urlsplit(url)
+          if (parsed.scheme != 'https' or not parsed.hostname
+                  or parsed.username or parsed.password
+                  or parsed.path or parsed.query or parsed.fragment):
+              raise SystemExit('Set repository variable SUPABASE_URL to the HTTPS project URL.')
+          if not key or any(char.isspace() for char in key):
+              raise SystemExit('Set repository variable SUPABASE_PUBLISHABLE_KEY to a publishable key.')
+
+          # This file is public. Refuse secret/service-role keys rather than
+          # exposing them in a downloadable JavaScript module or build log.
+          if key.startswith('sb_publishable_') and len(key) > len('sb_publishable_'):
+              pass
+          else:
+              try:
+                  parts = key.split('.')
+                  if len(parts) != 3:
+                      raise ValueError('Not a JWT')
+                  payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=' * (-len(parts[1]) % 4)))
+                  if payload.get('role') != 'anon':
+                      raise ValueError('Not an anon key')
+              except Exception:
+                  raise SystemExit('Only a Supabase publishable key or legacy anon key may be published. Never use service_role or sb_secret keys.')
+
+          sources = (
+              'index.html', 'styles.css', 'app.js', 'store.js',
+              'cloud.js', 'cloud-ui.js', 'sync-core.js',
+          )
+          missing = [name for name in sources if not Path(name).is_file() or Path(name).is_symlink()]
+          if missing:
+              raise SystemExit('Missing required static source files: ' + ', '.join(missing))
+
+          output = Path('out')
+          if output.exists():
+              shutil.rmtree(output)
+          output.mkdir()
+          for name in sources:
+              shutil.copyfile(name, output / name)
+          (output / 'cloud-config.js').write_text(
+              '// Generated from GitHub repository variables. Public configuration only.\n'
+              + 'export const SUPABASE_URL = ' + json.dumps(url) + ';\n'
+              + 'export const SUPABASE_PUBLISHABLE_KEY = ' + json.dumps(key) + ';\n',
+              encoding='utf-8',
+          )
+          expected = set(sources) | {'cloud-config.js'}
+          actual = {path.name for path in output.iterdir()}
+          if actual != expected:
+              raise SystemExit('Static publish allowlist does not match.')
+          print('Prepared the 8 allowed static files for GitHub Pages.')
+          PY
+          for file in out/*.js; do
+            node --check "$file"
+          done
+
+      - name: Upload the static site only
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+      - name: Publish GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
