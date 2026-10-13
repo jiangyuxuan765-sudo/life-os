@@ -1,0 +1,12 @@
+{
+  "name": "life-os",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A local-first personal Life OS",
+  "scripts": {
+    "start": "python3 -m http.server 4173 --bind 127.0.0.1",
+    "check": "node --check app.js && node --check store.js && node --check cloud.js && node --check cloud-ui.js && node --check sync-core.js",
+    "test": "node --test tests/*.test.mjs"
+  }
+}

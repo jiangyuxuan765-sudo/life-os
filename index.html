@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#111310">
+  <meta name="description" content="你的个人 Life OS。让决策、状态、周计划、行动和复盘，在同一个空间连接起来。">
+  <title>Life OS · 把生活调到自己的节奏</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='20' fill='%23b8f76a'/%3E%3Cpath d='M20 17v30h26M30 27v10h16' fill='none' stroke='%23111310' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="i-decision" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/><path d="M12 1v3m0 16v3M1 12h3m16 0h3"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+    <symbol id="i-week" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 10h18m-13 4h1m6 0h1m-8 3h1m6 0h1"/></symbol>
+    <symbol id="i-execute" viewBox="0 0 24 24"><path d="m6 18 12-12M7 6h11v11"/></symbol>
+    <symbol id="i-record" viewBox="0 0 24 24"><path d="M5 4h11a3 3 0 0 1 3 3v14H7a3 3 0 0 1-3-3V5a1 1 0 0 1 1-1Zm-1 13h15M8 8h7m-7 4h5"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M20 4S7 2 5 10c-2 8 9 11 12 4 2-4 3-10 3-10ZM4 21l10-12"/></symbol>
+  </defs></svg>
+  <a href="#view" class="skip-link">跳到主要内容</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="工作区侧栏">
+      <a class="brand" href="#decision" aria-label="Life OS 首页">
+        <span class="brand-icon"><svg viewBox="0 0 30 30" fill="none" aria-hidden="true"><path d="M15 3v7m0 10v7M3 15h7m10 0h7M6.5 6.5l5 5m7 7 5 5m-17 0 5-5m7-7 5-5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><circle cx="15" cy="15" r="5.3" stroke="currentColor" stroke-width="2.6"/></svg></span>
+        <span>life<span class="brand-light">os</span><span class="brand-dot">.</span></span>
+      </a>
+      <div class="workspace-switch"><span class="workspace-monogram">L</span><div>我的生活空间<small>PERSONAL WORKSPACE</small></div><span class="online-indicator" title="本地工作区"></span></div>
+      <div class="nav-label">我的系统 <span>05</span></div>
+      <nav class="main-nav" aria-label="主导航">
+        <a href="#decision" data-page="decision" aria-label="决策"><span class="nav-icon"><svg><use href="#i-decision"/></svg></span><span>决策</span><span class="nav-counter" id="nav-pending">—</span></a>
+        <a href="#monitor" data-page="monitor" aria-label="监控"><span class="nav-icon"><svg><use href="#i-monitor"/></svg></span><span>监控</span><span class="nav-index">02</span></a>
+        <a href="#week" data-page="week" aria-label="周计划"><span class="nav-icon"><svg><use href="#i-week"/></svg></span><span>周计划</span><span class="nav-index">03</span></a>
+        <a href="#execute" data-page="execute" aria-label="执行"><span class="nav-icon"><svg><use href="#i-execute"/></svg></span><span>执行</span><span class="nav-index">04</span></a>
+        <a href="#record" data-page="record" aria-label="记录"><span class="nav-icon"><svg><use href="#i-record"/></svg></span><span>记录</span><span class="nav-index">05</span></a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="system-note"><div class="system-note-label"><span class="online-indicator"></span>一步一步，也是在前进。</div><p>为重要的事腾出空间。</p><span id="sidebar-progress">正在读取本周进度</span><div class="system-line"><span></span></div></div>
+        <div class="profile"><div class="profile-avatar"><svg><use href="#i-leaf"/></svg></div><div>好好生活<small>我的个人工作区</small></div><span class="local-dot" title="数据保存在当前浏览器"></span></div>
+      </div>
+    </aside>
+    <div class="main-shell">
+      <header class="topbar">
+        <a class="mobile-brand" href="#decision">lifeos<span>.</span></a>
+        <div class="schedule-capsule">
+          <a class="schedule-label" href="#week"><span>我的一天</span><span class="today-pill"><svg><use href="#i-week"/></svg><span id="today-label">今天</span></span></a>
+          <div id="schedule" class="schedule-track"><span class="schedule-empty">给今天留一点空间。</span></div>
+          <a href="#week" class="schedule-next" aria-label="查看周计划"><svg><use href="#i-chevron"/></svg></a>
+        </div>
+        <div class="topbar-actions"><button class="icon-button" id="global-search" aria-label="搜索决策、任务和记录" title="搜索"><svg><use href="#i-search"/></svg></button><button class="icon-button add-button" id="quick-add" aria-label="快速新增" title="快速新增"><svg><use href="#i-plus"/></svg></button></div>
+      </header>
+      <div class="top-context"><span><span class="tiny-dot"></span> <span id="page-tag">PERSONAL WORKSPACE</span></span><span class="saved-indicator">本地工作区 <span class="tiny-dot"></span></span></div>
+      <main id="view" tabindex="-1" aria-label="主要内容"><div class="loading-state"><span></span>正在整理你的生活空间…</div></main>
+      <footer class="app-footer"><span>LESS NOISE. MORE LIFE.</span><span>留一点余地，给生活本身。</span></footer>
+    </div>
+  </div>
+  <nav class="bottom-nav" aria-label="移动端导航">
+    <a href="#decision" data-page="decision" aria-label="决策"><svg><use href="#i-decision"/></svg><span>决策</span></a>
+    <a href="#monitor" data-page="monitor" aria-label="监控"><svg><use href="#i-monitor"/></svg><span>监控</span></a>
+    <a href="#week" data-page="week" aria-label="周计划"><svg><use href="#i-week"/></svg><span>周计划</span></a>
+    <a href="#execute" data-page="execute" aria-label="执行"><svg><use href="#i-execute"/></svg><span>执行</span></a>
+    <a href="#record" data-page="record" aria-label="记录"><svg><use href="#i-record"/></svg><span>记录</span></a>
+  </nav>
+  <dialog id="editor-dialog" aria-modal="true" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+  <div id="toast" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+  <noscript><div class="noscript-message">请启用 JavaScript，以使用 Life OS 的记录和计划功能。</div></noscript>
+</body>
+</html>
