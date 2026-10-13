@@ -318,6 +318,28 @@ test('publishable key is only an apikey header, while Authorization contains onl
   assert.ok(requests.every(request => request.cache === 'no-store'));
 });
 
+test('default browser fetch retains the global receiver while custom fetch injection stays independent', async t => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  let nativeCalls = 0, injectedCalls = 0;
+  globalThis.fetch = async function (url, options) {
+    assert.equal(this, globalThis, 'native Window.fetch must not receive the SupabaseClient as this');
+    nativeCalls++;
+    assert.equal(new URL(url).pathname, '/auth/v1/otp');
+    assert.equal(options.method, 'POST');
+    return { ok: true, status: 200, text: async () => '{}' };
+  };
+  const nativeClient = new SupabaseClient(CONFIG, { storage: new MemoryStorage() });
+  await nativeClient.sendCode('person@example.com', 'https://person.github.io/life-os/');
+  const injectedClient = new SupabaseClient(CONFIG, { storage: new MemoryStorage(), fetcher: async () => {
+    injectedCalls++;
+    return { ok: true, status: 200, text: async () => '{}' };
+  } });
+  await injectedClient.sendCode('person@example.com', 'https://person.github.io/life-os/');
+  assert.equal(nativeCalls, 1);
+  assert.equal(injectedCalls, 1);
+});
+
 test('token refresh uses no key bearer, coalesces concurrent refreshes, and updates the JWT', async () => {
   const storage = new MemoryStorage(), requests = [];
   const client = new SupabaseClient(CONFIG, { storage, fetcher: async (url, options) => {
