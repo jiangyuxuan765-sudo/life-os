@@ -17,8 +17,9 @@ const initial = () => ({
   metrics: [{ date: todayISO(), energy: 7, sleep: 8, exercise: 20, focus: 25 }],
 });
 
-function harness() {
-  const nodes = new Map(), handlers = new Map(), saved = [];
+function harness({ demo = false, hash = '#decision' } = {}) {
+  const nodes = new Map(), handlers = new Map(), windowHandlers = new Map(), saved = [];
+  const calls = { cloud: 0, cloudUI: 0, reload: 0 };
   let cloud, serial = 0;
   class Element {
     constructor() { this.dataset = {}; this.style = { setProperty() {} }; this.classList = { toggle() {} }; this.children = new Map(); this.open = false; this.isConnected = true; this.textContent = ''; this._html = ''; }
@@ -40,21 +41,24 @@ function harness() {
   const element = selector => { if (!nodes.has(selector)) nodes.set(selector, new Element()); return nodes.get(selector); };
   const context = {
     console, URL, URLSearchParams, Date, Map, WeakMap, Set,
-    STORAGE_KEY: 'life-os.workspace.v1', todayISO, addDays, weekDates, uid: () => `new-${++serial}`,
+    IS_DEMO: demo, STORAGE_KEY: 'life-os.workspace.v1', todayISO, addDays, weekDates, uid: () => `new-${++serial}`,
     loadState: initial,
     saveState: state => { assert.equal(validState(state), true); saved.push(clone(state)); },
-    CloudSync: class { constructor(options) { cloud = options; } schedulePush() {} async start() {} },
-    mountCloudUI() {},
+    CloudSync: class { constructor(options) { calls.cloud++; cloud = options; } schedulePush() {} async start() {} },
+    mountCloudUI() { calls.cloudUI++; },
     document: { querySelector: element, querySelectorAll: () => [], documentElement: new Element(), activeElement: new Element(), addEventListener(type, fn) { if (!handlers.has(type)) handlers.set(type, []); handlers.get(type).push(fn); } },
-    window: { addEventListener() {}, scrollTo() {} },
-    location: { hash: '#decision' },
+    window: { addEventListener(type, fn) { windowHandlers.set(type, fn); }, scrollTo() {} },
+    location: { hash, search: demo ? '?demo=1' : '', reload() { calls.reload++; } },
+    localStorage: { getItem() { throw new Error('App must leave storage access to store.js'); }, setItem() { throw new Error('App must leave storage access to store.js'); } },
+    fetch() { throw new Error('App must not issue requests in demo mode'); },
     requestAnimationFrame: fn => fn(), setInterval: () => 1, setTimeout: () => 1, clearTimeout() {},
     FormData: class { constructor(form) { this.data = form.values; } [Symbol.iterator]() { return Object.entries(this.data)[Symbol.iterator](); } get(key) { return this.data[key]; } },
   };
-  vm.runInNewContext(source, context, { filename: 'app.js' });
+  const sandbox = vm.createContext(context);
+  vm.runInContext(source, sandbox, { filename: 'app.js' });
   return {
-    saved, nodes, context,
-    get state() { return cloud.getState(); },
+    saved, nodes, context, calls, windowHandlers,
+    get state() { return vm.runInContext('state', sandbox); },
     get form() { return element('#dialog-content').form; },
     get dialog() { return element('#editor-dialog'); },
     click(action, extra = {}, form = null) { const trigger = { dataset: { action, ...extra }, tagName: 'BUTTON', closest: selector => selector === 'form' ? form : null }; for (const handler of handlers.get('click') || []) handler({ target: { closest: () => trigger }, preventDefault() {} }); },
@@ -63,6 +67,73 @@ function harness() {
     error(form = this.form) { return form.querySelector('.form-error').textContent; },
   };
 }
+
+test('demo never constructs cloud UI, handles auth, or subscribes to personal storage', () => {
+  const hash = '#access_token=must-not-consume&refresh_token=must-not-consume';
+  const h = harness({ demo: true, hash });
+  assert.equal(h.calls.cloud, 0);
+  assert.equal(h.calls.cloudUI, 0);
+  assert.equal(h.windowHandlers.has('storage'), false);
+  assert.equal(h.context.location.hash, hash, 'demo does not consume an auth callback');
+  assert.match(h.nodes.get('.saved-indicator').innerHTML, /交互演示 · 刷新即重置/);
+  assert.match(h.nodes.get('.saved-indicator').innerHTML, /data-action="reset-demo"/);
+  assert.match(h.nodes.get('.profile').innerHTML, /示例内容 · 仅供体验/);
+  assert.doesNotMatch(h.nodes.get('.profile').innerHTML, /data-cloud|登录|导入|导出/);
+  assert.match(h.context.document.title, /交互演示/);
+});
+
+test('demo retains five-page navigation and temporary create, complete, metrics, and timer actions', () => {
+  const h = harness({ demo: true });
+  for (const page of ['decision', 'monitor', 'week', 'execute', 'record']) {
+    h.context.location.hash = `#${page}`; h.windowHandlers.get('hashchange')();
+    assert.match(h.context.document.title, /交互演示/);
+    assert.ok(h.nodes.get('#view').innerHTML.length > 1000);
+    assert.match(h.nodes.get('#page-tag').textContent, /演示/);
+  }
+  h.click('new-decision');
+  h.submit({ title: 'Demo decision', context: 'Temporary', category: '成长', impact: '中', deadline: '', options: 'A\nB' });
+  h.click('new-task');
+  h.submit({ title: 'Demo task', date: todayISO(), time: '', duration: '25', category: '个人', priority: 'normal' });
+  const taskId = h.state.tasks.find(task => task.title === 'Demo task').id;
+  h.click('toggle-task', { id: taskId });
+  h.click('new-goal'); h.submit({ title: 'Demo goal' });
+  h.click('log-metrics', { date: todayISO() });
+  h.submit({ date: todayISO(), energy: '8', sleep: '8', exercise: '30', focus: '50' });
+  h.click('new-note');
+  h.submit({ title: 'Demo note', body: 'Temporary draft', date: todayISO(), tag: '随手记' });
+  h.click('toggle-timer');
+  assert.equal(h.state.timer.running, true);
+  h.click('toggle-timer'); assert.equal(h.state.timer.running, false);
+  assert.equal(h.state.tasks.find(task => task.id === taskId).done, true);
+  assert.ok(h.state.decisions.some(item => item.title === 'Demo decision'));
+  assert.ok(h.state.goals.some(item => item.title === 'Demo goal'));
+  assert.equal(h.state.metrics[0].focus, 50);
+  assert.ok(h.state.notes.some(item => item.title === 'Demo note'));
+  assert.equal(h.calls.cloud, 0);
+  assert.equal(h.calls.cloudUI, 0);
+});
+
+test('reset demo reloads without dropping its query and a fresh page starts from unchanged examples', () => {
+  const h = harness({ demo: true });
+  h.click('toggle-task', { id: 'task' }); h.click('toggle-timer');
+  h.click('reset-demo');
+  assert.equal(h.calls.reload, 1);
+  assert.equal(h.context.location.search, '?demo=1');
+  const reloaded = harness({ demo: true });
+  assert.equal(reloaded.state.tasks[0].done, false);
+  assert.equal(reloaded.state.timer.running, false);
+  assert.equal(reloaded.state.timer.remaining, 1500);
+  assert.equal(reloaded.calls.cloud, 0);
+});
+
+test('personal mode still initializes cloud controls and listens for saved workspace updates', () => {
+  const h = harness();
+  assert.equal(h.calls.cloud, 1);
+  assert.equal(h.calls.cloudUI, 1);
+  assert.equal(h.windowHandlers.has('storage'), true);
+  assert.doesNotMatch(h.context.document.title, /演示/);
+  h.click('reset-demo'); assert.equal(h.calls.reload, 0);
+});
 
 const cases = [
   { name: 'notes', action: 'edit-note', id: 'note', collection: 'notes', change: item => { item.body = 'Remote note body'; }, values: { title: 'Local changed title', body: 'Original body', date: todayISO(), tag: '随手记' } },
