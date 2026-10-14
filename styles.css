@@ -754,3 +754,16 @@ button.history-row:hover { background: #26371c; }
 .account-section .site-address { overflow-wrap: anywhere; font-family: var(--mono); font-size: 10px; color: #c8d8b9; }
 .cloud-notice { font-size: 11px; color: var(--lime); padding: 10px 0 0; }
 @media(max-width:600px) { .sync-status { font-size: 8px; padding: 5px 8px; } .cloud-summary { flex-wrap: wrap; } .account-buttons .button { font-size: 10px; } #account-dialog .input { font-size: 16px; } }
+/* The demo controls stay visible even when the desktop account sidebar hides. */
+.top-context .demo-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; color: #b9c9aa; font: 10px/1.5 var(--font); letter-spacing: 0; text-transform: none; }
+.demo-label { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.demo-label .tiny-dot { background: var(--lime); }
+.demo-reset { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 6px 11px; border: 1px solid #435735; border-radius: 99px; color: #d5e6c4; background: #25341c; font-size: 10px; white-space: nowrap; }
+.demo-reset:hover { color: var(--lime); border-color: #779a56; background: #304225; }
+.demo-reset svg { width: 13px; height: 13px; }
+.demo-profile { cursor: default; }
+@media(max-width:600px) {
+  .top-context:has(.demo-toolbar) { flex-wrap: wrap; gap: 11px; }
+  .top-context .demo-toolbar { flex-basis: 100%; justify-content: space-between; padding: 9px 11px; border: 1px solid #35442b; border-radius: 14px; background: #1b2416; font-size: 10px; gap: 8px; }
+  .demo-reset { min-height: 38px; padding: 7px 11px; }
+}

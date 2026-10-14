@@ -1,4 +1,4 @@
-import { STORAGE_KEY, todayISO, addDays, weekDates, uid, loadState, saveState } from './store.js';
+import { IS_DEMO, STORAGE_KEY, todayISO, addDays, weekDates, uid, loadState, saveState } from './store.js';
 import { CloudSync } from './cloud.js';
 import { mountCloudUI } from './cloud-ui.js';
 
@@ -193,7 +193,7 @@ function renderRecord() {
 function renderShell() {
   $$('[data-page]').forEach(link => { const active = link.dataset.page === page; link.classList.toggle('active', active); if (active) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
   if ($('#today-label')) $('#today-label').textContent = `${dateText(todayISO(), { month: 'long', day: 'numeric' })} ${weekDay(todayISO())}`;
-  if ($('#page-tag')) $('#page-tag').textContent = `${pages[page]}工作区`;
+  if ($('#page-tag')) $('#page-tag').textContent = `${pages[page]}${IS_DEMO ? '演示' : '工作区'}`;
   if ($('#nav-pending')) $('#nav-pending').textContent = countLabel(state.decisions.filter(d => !d.status || d.status === 'pending').length);
   if ($('#sidebar-progress')) $('#sidebar-progress').textContent = `本周行动 · ${percentage(currentWeekTasks())}% 已完成`;
   document.documentElement.style.setProperty('--progress', `${percentage(currentWeekTasks())}%`);
@@ -217,7 +217,7 @@ function navigate(destination) {
 function route() {
   if (dialog.open) closeDialog();
   page = Object.hasOwn(pages, location.hash.slice(1)) ? location.hash.slice(1) : 'decision';
-  document.title = `${pages[page]} · Life OS`;
+  document.title = `${pages[page]} · Life OS${IS_DEMO ? ' · 交互演示' : ''}`;
   $('#quick-add')?.setAttribute('aria-label', `在${pages[page]}中新建`);
   render();
   window.scrollTo({ top: 0, behavior: 'instant' });
@@ -331,6 +331,7 @@ document.addEventListener('click', event => {
   const action = trigger.dataset.action;
   const id = trigger.dataset.id;
   switch (action) {
+    case 'reset-demo': if (IS_DEMO) location.reload(); break;
     case 'new-goal': openDialog('这一周，什么最重要？', '选一个清晰的方向，留出真正推进的空间。', inputField('本周方向', 'title', '', 'required maxlength="100" placeholder="例如：完成作品集的第一版"'), '', 'goal'); break;
     case 'edit-goal': {
       const goal = state.goals.find(item => item.id === id);
@@ -505,7 +506,7 @@ document.addEventListener('keydown', event => {
 });
 document.querySelector('.skip-link')?.addEventListener('click', event => { event.preventDefault(); view.focus(); view.scrollIntoView({ block: 'start' }); });
 window.addEventListener('hashchange', route);
-window.addEventListener('storage', event => {
+if (!IS_DEMO) window.addEventListener('storage', event => {
   if (event.key !== STORAGE_KEY) return;
   const newest = loadState();
   if (newest.error) { toast(newest.error.message, 'error', 9000); return; }
@@ -516,6 +517,22 @@ window.addEventListener('storage', event => {
 setInterval(timerTick, 1000);
 route();
 timerTick();
+if (IS_DEMO) {
+  const indicator = $('.saved-indicator');
+  if (indicator) {
+    indicator.className = 'demo-toolbar';
+    indicator.innerHTML = `<span class="demo-label"><span class="tiny-dot"></span>交互演示 · 刷新即重置</span><button class="demo-reset" type="button" data-action="reset-demo" aria-label="重置演示，恢复全部示例内容">${icon('reset')}重置演示</button>`;
+  }
+  const profile = $('.profile');
+  if (profile) {
+    profile.className = 'profile demo-profile';
+    profile.removeAttribute('role'); profile.removeAttribute('tabindex');
+    profile.setAttribute('aria-label', '演示空间，所有操作仅用于当前体验');
+    profile.innerHTML = `<div class="profile-avatar">${icon('spark')}</div><div>自由试一试<small>示例内容 · 仅供体验</small></div>`;
+  }
+  const workspace = $('.workspace-switch');
+  if (workspace) workspace.innerHTML = '<span class="workspace-monogram">D</span><div>Life OS 演示空间<small>INTERACTIVE DEMO</small></div><span class="online-indicator" title="临时体验空间"></span>';
+} else {
 cloudSync = new CloudSync({
   getState: () => state,
   replaceState: next => {
@@ -534,4 +551,5 @@ cloudSync = new CloudSync({
 });
 mountCloudUI({ sync: cloudSync, getState: () => state, notify: toast });
 cloudSync.start().catch(error => toast(error.message, 'error'));
+}
 if (state.error) toast(state.error.message, 'error', 9000);

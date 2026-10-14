@@ -1,5 +1,7 @@
+// Capture the mode before any state is loaded; hash navigation keeps it unchanged.
+export const IS_DEMO = new URLSearchParams(globalThis.location?.search || '').get('demo') === '1';
 export const GUEST_STORAGE_KEY = 'life-os.workspace.v1';
-export let STORAGE_KEY = GUEST_STORAGE_KEY;
+export let STORAGE_KEY = IS_DEMO ? 'life-os.demo.memory-only' : GUEST_STORAGE_KEY;
 export function createEmptyState() {
   return { version: 1, tasks: [], decisions: [], metrics: [], goals: [], notes: [], timer: { taskId: '', remaining: 1500, duration: 1500, running: false, endsAt: null }, settings: { seeded: false } };
 }
@@ -72,11 +74,13 @@ export function validState(s) {
 let requiresRecovery = false;
 let lastReadRaw = null;
 export function setStorageScope(userId = '', project = '') {
+  if (IS_DEMO) return;
   STORAGE_KEY = userId ? `${GUEST_STORAGE_KEY}.account.${encodeURIComponent(project)}.${encodeURIComponent(userId)}` : GUEST_STORAGE_KEY;
   requiresRecovery = false;
   lastReadRaw = null;
 }
 export function readGuestState() {
+  if (IS_DEMO) return null;
   const raw = localStorage.getItem(GUEST_STORAGE_KEY);
   if (!raw) return null;
   const state = JSON.parse(raw);
@@ -84,6 +88,7 @@ export function readGuestState() {
   return state;
 }
 export function loadState() {
+  if (IS_DEMO) return initialState();
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     lastReadRaw = raw;
@@ -102,6 +107,7 @@ export function loadState() {
 }
 export function saveState(state) {
   if (!validState(state)) throw new Error('数据格式不完整，未保存；请检查输入后重试。');
+  if (IS_DEMO) return;
   try {
     const currentRaw = localStorage.getItem(STORAGE_KEY);
     if (currentRaw !== lastReadRaw) {
